@@ -1,341 +1,222 @@
 #![cfg_attr(not(any(feature = "export-abi", test)), no_main)]
 // written by Steven Hert, omo this code needs to be formated after the competition
-
-// #[global_allocator]
-// static ALLOC: mini_alloc::MiniAlloc = mini_alloc::MiniAlloc::INIT;
+#[global_allocator]
+static ALLOC: mini_alloc::MiniAlloc = mini_alloc::MiniAlloc::INIT;
 extern crate alloc;
-
 use stylus_sdk::{ alloy_primitives::U256, prelude::*, stylus_proc::entrypoint };
 
 use stylus_sdk::{ console, msg };
 
-use alloy_sol_types::sol;
-
 sol_storage! {
     #[entrypoint]
-    pub struct Room {
-        address[] player;
-        mapping(address => string ) name;
-        mapping(address => uint256) score;
-        State state;
-        bool started;
-        bool gameEnded;
+    pub struct Game {
+        string word;
+        string hint;
+        string guessed;
+        Player player1;
+        Player player2;
+        Player player3;
+        uint256 turn;
+        bool game_active;
+    
     }
 
-    pub struct State{
-        uint256 turn; // turns = 0 too 2, +1 until == 2 then equals to zero
-        string current;
-        string[] hints;
-        uint256 wordsLen;
-        string[] word;
-        uint256 total_guess;
-
-        
-    }
-}
-
-#[public]
-impl Room {
-    pub fn init(&mut self) {
-        self.started.set(false);
-        self.gameEnded.set(false);
-        self.state.turn.set(U256::from(0));
-        self.state.total_guess.set(U256::from(0));
-
-        let naxz = [
-            "kaleidoscope",
-            "antidisestablishmentarianism",
-            "uncharacteristically",
-            "disproportionateness",
-            "interchangeableness",
-            "misunderstandingly",
-            "indistinguishability",
-            "counterintuitiveness",
-            "unconstitutionality",
-            "incompatibilities",
-            "unintelligibilities",
-        ];
-
-        let hintx = [
-            [
-                "Optical device",
-                "Produces changing patterns",
-                "Uses mirrors and colored glass",
-                "Creates beautiful and shifting designs",
-                "Often used for visual art",
-            ],
-            [
-                "opposition to withdrawing state support from an established institution",
-                "historical",
-                "religious context",
-                "political term",
-                "long word",
-            ],
-            [
-                "acting in a way that is not typical",
-                "uncommon behavior",
-                "out of character",
-                "unusual actions",
-                "rare",
-            ],
-            [
-                "lack of proportion",
-                "uneven distribution",
-                "imbalance",
-                "size difference",
-                "disproportion",
-            ],
-            [
-                "capable of being exchanged",
-                "mutual replacement",
-                "swapping things",
-                "substitution",
-                "mutual",
-            ],
-            [
-                "misinterpretation",
-                "failure to understand correctly",
-                "confusion",
-                "wrong idea",
-                "misconception",
-            ],
-            [
-                "not able to be distinguished",
-                "difficult to tell apart",
-                "similar in appearance",
-                "identity confusion",
-                "likeness",
-            ],
-            [
-                "goes against common sense",
-                "counter to expectations",
-                "surprising logic",
-                "paradoxical",
-                "unconventional reasoning",
-            ],
-            [
-                "in violation of a constitutional law",
-                "illegal by constitution",
-                "law-related",
-                "government rules",
-                "invalid",
-            ],
-            [
-                "inability to exist or work together",
-                "conflicting traits",
-                "differences",
-                "unsuitable pairing",
-                "non-cohesive",
-            ],
-            [
-                "unable to be understood",
-                "incomprehensible",
-                "unclear communication",
-                "confusing language",
-                "vague",
-            ],
-        ];
-
-        let max = naxz.len();
-        let number = 1;
-
-        let word_new = naxz[number as usize].to_string();
-        let word_len = word_new.len();
-        self.state.wordsLen.set(U256::from(word_len));
-        for _xi in 0..word_len {
-            let mut star = self.state.word.grow();
-            let charx = "*".to_string();
-            star.set_str(charx);
-        }
-        self.state.current.set_str(word_new);
-        let datr = hintx[number as usize];
-
-        for d in datr {
-            let mut appl = self.state.hints.grow();
-            let string_data = d.to_string();
-            appl.set_str(string_data);
-        }
-        self.state.wordsLen.set(U256::from(12));
-    }
-
-    pub fn add_player(&mut self, name: String) -> Result<String, String> {
-        if self.player.len() == 3 {
-            for index in 0..self.player.len() {
-                if let Some(storage_guard) = self.player.getter(index) {
-                    if format!("{}", *storage_guard.get()) == format!("{}", msg::sender()) {
-                        return Ok(String::from("Game Started"));
-                    }
-                }
-            }
-            return Err("Game is full".to_string());
-        }
-        self.player.push(msg::sender());
-
-        let mut name_accessor = self.name.setter(msg::sender());
-        name_accessor.set_str(name);
-        self.score.insert(msg::sender(), U256::from(0));
-        if self.game_start() {
-            return Ok(String::from("Start"));
-        }
-        return Ok("wait....".to_string());
-    }
-
-    pub fn play(&mut self, letter: String) -> Result<String, String> {
-        if self.gameEnded.get() {
-            return Err("Game is ended".to_string());
-        }
-        if !self.in_room() {
-            return Err("you are not in room".to_string());
-        }
-        if !self.started.get() {
-            return Err("game in lobby".to_string());
-        }
-        let playerIn = self.player_index();
-        if self.state.turn.get() == U256::from(playerIn) {
-            let current_string = self.state.current.get_string();
-            let word = String::from(current_string);
-            let count_ = self.count_and_update(word, letter);
-            let mut current_score = self.score.setter(msg::sender());
-
-            let new_score = current_score.get() + U256::from(count_);
-            current_score.set(new_score);
-            let mut _m = vec![];
-            for inx in 0..self.state.word.len() {
-                let items = self.state.word.getter(inx);
-                if let Some(_e) = items {
-                    _m.push(_e.get_string());
-                }
-            }
-            self.change_turn();
-            return Ok(format!(r#"{{"result":{},"state":{:?}}}"#, count_, _m));
-        } else {
-            return Err("not your turn".to_string());
-        }
-    }
-
-    pub fn get_score(&self) -> String {
-        let mut names = vec![];
-        let mut scores = vec![];
-
-        for index in 0..3 {
-            if let Some(storage_guard) = self.player.getter(index) {
-                let name = self.name.getter(storage_guard.get());
-
-                names.push(name.get_string());
-
-                let score = self.score.getter(storage_guard.get());
-
-                scores.push(score.get());
-            }
-        }
-        return format!(r#"{{"names":{:?},"score":{:?}}}"#, names, scores);
-    }
-
-    pub fn get_word_len(&self) {
-        self.state.wordsLen.get();
-    }
-
-    pub fn get_hint(&self) -> Result<String, String> {
-        let current_guess_state = self.state.total_guess.get();
-        if current_guess_state < U256::from(4) {
-            return Err("No Hints".to_string());
-        } else {
-            let mut hint_ = vec![];
-            let hint_len = current_guess_state / U256::from(4);
-            if hint_len >= U256::from(5) {
-                for inx in 0..5 {
-                    let items = self.state.hints.getter(inx);
-                    if let Some(_e) = items {
-                        hint_.push(_e.get_string());
-                    }
-                }
-                return Ok(format!(r#"{{"hints":{:?}}}"#, hint_));
-            } else {
-                let test = [1, 2, 3, 4];
-                let mut control = 0;
-                for tst in test {
-                    if U256::from(tst.clone()) == hint_len {
-                        control = tst;
-                        break;
-                    }
-                }
-                for inx in 0..control {
-                    let items = self.state.hints.getter(inx);
-                    if let Some(_e) = items {
-                        hint_.push(_e.get_string());
-                    }
-                }
-                return Ok(format!(r#"{{"hints":{:?}}}"#, hint_));
-            }
-        }
+    pub struct Player {
+        string name;
+        string name_id;
+        uint256 score;
+        uint256 turn;
     }
 }
 
-impl Room {
-    pub fn in_room(&self) -> bool {
-        for index in 0..self.player.len() {
-            if let Some(storage_guard) = self.player.getter(index) {
-                if format!("{}", *storage_guard.get()) == format!("{}", msg::sender()) {
-                    return true;
-                }
-            }
-        }
-        return false;
+#[external]
+impl Game {
+    pub fn new(&mut self) -> String {
+        let word = "antidisestablishmentarianism".to_string();
+        let hint =
+            "opposition to withdrawing state support from an established institution,
+            historical,
+            religious context,
+            political term,
+            long word".to_string();
+
+        // omo this is self explanatry
+        self.word.set_str(word);
+        self.hint.set_str(hint);
+        self.guessed.set_str("");
+        self.turn.set(U256::from(1));
+        self.game_active.set(false);
+        self.player1.name.set_str("");
+        self.player1.name_id.set_str("");
+        self.player1.score.set(U256::from(0));
+        self.player1.turn.set(U256::from(1));
+        self.player2.name.set_str("");
+        self.player2.name_id.set_str("");
+        self.player2.score.set(U256::from(0));
+        self.player3.name.set_str("");
+        self.player3.name_id.set_str("");
+        self.player3.score.set(U256::from(0));
+        return "Machine new state".to_string();
     }
 
-    pub fn player_index(&self) -> u8 {
-        for index in 0..self.player.len() {
-            if let Some(storage_guard) = self.player.getter(index) {
-                if format!("{}", *storage_guard.get()) == format!("{}", msg::sender()) {
-                    return index as u8;
-                }
+    pub fn add_player(&mut self, name: String) -> String {
+        if self.game_active.get() {
+            return String::from("Game has started");
+        }
+        if self.player1.name.get_string() == String::from("") {
+            self.player1.name.set_str(name);
+            let user_id = format!("{}", msg::sender());
+            self.player1.name_id.set_str(user_id);
+            return String::from("Player1 set");
+        } else if self.player1.name.get_string() == String::from("") {
+            self.player2.name.set_str(name);
+            let user_id = format!("{}", msg::sender());
+            self.player2.name_id.set_str(user_id);
+            return String::from("Player2 set");
+        } else if self.player1.name.get_string() == String::from("") {
+            self.player3.name.set_str(name);
+            let user_id = format!("{}", msg::sender());
+            self.player3.name_id.set_str(user_id);
+            self.game_active.set(true);
+            return String::from("Player3 set");
+        } else {
+            return String::from("No more player space");
+        }
+    }
+
+    // Guess a letter (called by frontend for each player’s turn)
+    pub fn guess_letter(&mut self, letter: String) -> String {
+        if !self.game_active.get() {
+            return String::from("Game over. Start a new game.");
+        }
+
+        if self.my_turn() == 0 {
+            return String::from("It's not your turn.");
+        }
+
+        // Check if letter is in the word
+        let mut score_increase = 0;
+        for c in self.word.get_string().chars() {
+            if c.to_string() == letter {
+                score_increase += 1;
+            }
+        }
+
+        // Update player score
+        match self.my_turn() {
+            1 => {
+                let state_x = self.player1.score.get();
+                let state_x2 = state_x + U256::from(score_increase);
+                self.player1.score.set(state_x2);
+            }
+            2 => {
+                let state_x = self.player2.score.get();
+                let state_x2 = state_x + U256::from(score_increase);
+                self.player2.score.set(state_x2);
+            }
+            3 => {
+                let state_x = self.player3.score.get();
+                let state_x2 = state_x + U256::from(score_increase);
+                self.player3.score.set(state_x2);
+            }
+            _ => (),
+        }
+
+        let character = letter.chars().next();
+
+        match character {
+            Some(c) => self.guessed.get_string().push(c),
+            None => (),
+        }
+
+        if self.is_word_complete() {
+            self.game_active.set(false);
+            let t = self.get_guessed_word();
+            return format!(
+                "Game complete! {} is the winner! word is {}",
+                self.get_winner_name(),
+                t
+            );
+        }
+        let turner;
+        if self.turn.get() == U256::from(3) {
+            turner = U256::from(1);
+        } else {
+            turner = self.turn.get() + U256::from(1);
+        }
+        // Change turn to next player
+        self.turn.set(turner);
+
+        // Return the guessed state to the frontend
+        self.get_guessed_word()
+    }
+
+    // Check if the word is fully guessed
+    fn is_word_complete(&self) -> bool {
+        self.word
+            .get_string()
+            .chars()
+            .all(|c| self.guessed.get_string().contains(c))
+    }
+
+    // Get the current state of the guessed word (e.g., *ddr***)
+    pub fn get_guessed_word(&self) -> String {
+        self.word
+            .get_string()
+            .chars()
+            .map(|c| if self.guessed.get_string().contains(c) { c } else { '*' })
+            .collect()
+    }
+
+    // Get the name of the player with the highest score
+    pub fn get_winner_name(&self) -> String {
+        let mut winner = self.player1.name.get_string();
+        if self.player2.score.get() > self.player1.score.get() {
+            winner = self.player2.name.get_string();
+        }
+        if self.player3.score.get() > self.player1.score.get() {
+            winner = self.player3.name.get_string();
+        }
+        winner
+    }
+
+    pub fn get_scores(&self) -> String {
+        let player1_score = self.player1.score.get();
+        let player2_score = self.player2.score.get();
+        let player3_score = self.player3.score.get();
+        let player1_name = self.player1.name.get_string();
+        let player2_name = self.player2.name.get_string();
+        let player3_name = self.player3.name.get_string();
+        return format!(
+            r#"{{{}:{}, {}:{}, {}:{}}}"#,
+            player1_name,
+            player1_score,
+            player2_name,
+            player2_score,
+            player3_name,
+            player3_score
+        );
+    }
+}
+
+impl Game {
+    pub fn my_turn(&self) -> u8 {
+        // return my turn number if it's my turn
+        // return 0 if it's not my turn
+        let user_id = format!("{}", msg::sender());
+        if self.player1.name_id.get_string() == user_id {
+            if self.player1.turn.get() == self.turn.get() {
+                return 1;
+            }
+        } else if self.player2.name_id.get_string() == user_id {
+            if self.player2.turn.get() == self.turn.get() {
+                return 2;
+            }
+        } else if self.player3.name_id.get_string() == user_id {
+            if self.player3.turn.get() == self.turn.get() {
+                return 3;
             }
         }
         return 0;
     }
-
-    pub fn count_and_update(&mut self, word: String, letter: String) -> usize {
-        if letter.len() != 1 {
-            return 0;
-        }
-
-        let letter_char = letter.chars().next().unwrap();
-        let mut count = 0;
-
-        for (i, c) in word.chars().enumerate() {
-            if c == letter_char {
-                if let Some(mut x) = self.state.word.setter(i) {
-                    x.set_str(c.to_string());
-                }
-                count += 1;
-            }
-        }
-
-        count
-    }
-    pub fn change_turn(&mut self) {
-        let current_guess = self.state.total_guess.get() + U256::from(1);
-        self.state.total_guess.set(current_guess);
-
-        if self.state.turn.get() == U256::from(2) {
-            self.state.turn.set(U256::from(0));
-        } else {
-            let state_ = U256::from(1) + self.state.turn.get();
-            self.state.turn.set(state_);
-        }
-    }
-
-    pub fn game_start(&mut self) -> bool {
-        if self.player.len() == 3 {
-            self.started.set(true);
-            return true;
-        }
-        return false;
-    }
-
-    // still having the compersion issue and only this random dependencies is over 210kb
-    // pub fn random_number(&self, max: u32) -> u32 {
-    //     let mut rng = rand::thread_rng();
-    //     rng.gen_range(0..max)
-    // }
 }
