@@ -1,66 +1,75 @@
 #![cfg_attr(not(any(feature = "export-abi", test)), no_main)]
 // written by Steven Hert, omo this code needs to be formated after the competition
-// #[global_allocator]
-// static ALLOC: mini_alloc::MiniAlloc = mini_alloc::MiniAlloc::INIT;
-extern crate alloc;
-use stylus_sdk::{ alloy_primitives::U256, prelude::*, stylus_proc::entrypoint };
 
+extern crate alloc;
+use stylus_sdk::{ alloy_primitives::U8, prelude::*, stylus_proc::entrypoint };
 use stylus_sdk::{ console, msg };
 
 sol_storage! {
     #[entrypoint]
     pub struct Game {
-        string word;
-        string hint;
-        string guessed;
-        Player player1;
-        Player player2;
-        Player player3;
-        uint256 turn;
-        bool game_active;
-    
+        string word; //holds the current state word
+        string hint;//holds the current state hint
+        string guessed;//holds the guessed letters
+        Player player1; //holds info on the first player
+        Player player2;// holds info on the secound player
+        Player player3;//holds info on the third player
+        uint8 turn; //holds the  turn of the current player
+        bool game_active; // this is used to control the state of the game, but due to space reason it is not implemented a lot
+        SWorod[] meta_data; //  this holds the current data on all the hints and games
     }
 
     pub struct Player {
-        string name;
-        string name_id;
-        uint256 score;
-        uint256 turn;
+        // this is the data of the state of a given player 
+        string name; // holds the name of the player(the fronend guy is to send me the name)
+        address name_id; // holds the wallet address of the player
+        uint8 score; // holds the score of the player
+        uint8 turn; // holds the turn id of the player\
+    }
+
+    pub struct SWorod{
+        //before i wanted to put all the data in a Vec<[String; 2]> list
+        string word; // holds a instance word
+        string hint;  //holds the hint of that instance word 
     }
 }
 
 #[public]
 impl Game {
-    pub fn new(&mut self) {
-        let word = "antidisestablishmentarianism".to_string();
-        let hint =
-            "opposition to withdrawing state support from an established institution,
-            historical,
-            religious context,
-            political term,
-            long word".to_string();
+    pub fn admin_set(&mut self, data: [String; 2]) {
+        // ths is to add more data to the stored hints and words
+        let mut state_increment = self.meta_data.grow();
+        state_increment.word.set_str(data[0].clone());
+        state_increment.hint.set_str(data[1].clone());
+    }
+
+    pub fn new(&mut self, index: u32) {
+        // this is to refresh the instance of the machine
         let default_x = "".to_string();
         // omo this is self explanatry
-        self.word.set_str(word);
-        self.hint.set_str(hint);
+        if let Some(state_word) = self.meta_data.get(index as usize) {
+            let word = state_word.word.get_string();
+            let hint = state_word.hint.get_string();
+            self.word.set_str(word);
+            self.hint.set_str(hint);
+        }
+
         self.guessed.set_str(default_x.clone());
-        self.turn.set(U256::from(1));
+        self.turn.set(U8::from(1));
         self.game_active.set(false);
 
         self.player1.name.set_str(default_x.clone());
-        self.player1.name_id.set_str(default_x.clone());
-        self.player1.score.set(U256::from(0));
-        self.player1.turn.set(U256::from(1));
+
+        self.player1.score.set(U8::from(0));
+        self.player1.turn.set(U8::from(1));
 
         self.player2.name.set_str(default_x.clone());
-        self.player2.name_id.set_str(default_x.clone());
-        self.player2.score.set(U256::from(0));
-        self.player2.turn.set(U256::from(2));
+        self.player2.score.set(U8::from(0));
+        self.player2.turn.set(U8::from(2));
 
         self.player3.name.set_str(default_x.clone());
-        self.player3.name_id.set_str(default_x.clone());
-        self.player3.score.set(U256::from(0));
-        self.player3.turn.set(U256::from(3));
+        self.player3.score.set(U8::from(0));
+        self.player3.turn.set(U8::from(3));
     }
 
     pub fn add_player(&mut self, name: String) {
@@ -69,18 +78,18 @@ impl Game {
         }
         if self.player1.name.get_string().is_empty() {
             self.player1.name.set_str(name);
-            let user_id = format!("{}", msg::sender());
-            self.player1.name_id.set_str(user_id);
+
+            self.player1.name_id.set(msg::sender());
             return;
         } else if self.player2.name.get_string().is_empty() {
             self.player2.name.set_str(name);
-            let user_id = format!("{}", msg::sender());
-            self.player2.name_id.set_str(user_id);
+
+            self.player2.name_id.set(msg::sender());
             return;
         } else if self.player3.name.get_string().is_empty() {
             self.player3.name.set_str(name);
-            let user_id = format!("{}", msg::sender());
-            self.player3.name_id.set_str(user_id);
+
+            self.player3.name_id.set(msg::sender());
             self.game_active.set(true);
             return;
         } else {
@@ -90,11 +99,8 @@ impl Game {
 
     // Guess a letter (called by frontend for each player’s turn)
     pub fn guess_letter(&mut self, letter: String) {
-        if !self.game_active.get() {
-            return;
-        }
-
-        if self.my_turn() == 0 {
+        let turn_x = self.my_turn();
+        if !self.game_active.get() || turn_x == 0 {
             return;
         }
 
@@ -111,20 +117,20 @@ impl Game {
         }
 
         // Update player score
-        match self.my_turn() {
+        match turn_x {
             1 => {
                 let state_x = self.player1.score.get();
-                let state_x2 = state_x + U256::from(score_increase);
+                let state_x2 = state_x + U8::from(score_increase);
                 self.player1.score.set(state_x2);
             }
             2 => {
                 let state_x = self.player2.score.get();
-                let state_x2 = state_x + U256::from(score_increase);
+                let state_x2 = state_x + U8::from(score_increase);
                 self.player2.score.set(state_x2);
             }
             3 => {
                 let state_x = self.player3.score.get();
-                let state_x2 = state_x + U256::from(score_increase);
+                let state_x2 = state_x + U8::from(score_increase);
                 self.player3.score.set(state_x2);
             }
             _ => (),
@@ -142,10 +148,10 @@ impl Game {
             return;
         }
         let turner;
-        if self.turn.get() == U256::from(3) {
-            turner = U256::from(1);
+        if self.turn.get() == U8::from(3) {
+            turner = U8::from(1);
         } else {
-            turner = self.turn.get() + U256::from(1);
+            turner = self.turn.get() + U8::from(1);
         }
         // Change turn to next player
         self.turn.set(turner);
@@ -177,6 +183,7 @@ impl Game {
         if self.player3.score.get() > self.player1.score.get() {
             winner = self.player3.name.get_string();
         }
+
         winner
     }
 
@@ -211,16 +218,16 @@ impl Game {
         // return  if it's my turn
         // return  if it's not my turn
 
-        let user_id = format!("{}", msg::sender());
-        if self.player1.name_id.get_string() == user_id {
+        let user_id = msg::sender();
+        if self.player1.name_id.get() == user_id {
             if self.player1.turn.get() == self.turn.get() {
                 return 1;
             }
-        } else if self.player2.name_id.get_string() == user_id {
+        } else if self.player2.name_id.get() == user_id {
             if self.player2.turn.get() == self.turn.get() {
                 return 2;
             }
-        } else if self.player3.name_id.get_string() == user_id {
+        } else if self.player3.name_id.get() == user_id {
             if self.player3.turn.get() == self.turn.get() {
                 return 3;
             }
